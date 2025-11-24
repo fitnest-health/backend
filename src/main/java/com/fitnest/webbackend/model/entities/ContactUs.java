@@ -2,16 +2,20 @@ package com.fitnest.webbackend.model.entities;
 
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
+import lombok.Getter;
 import lombok.NoArgsConstructor;
+import lombok.Setter;
 
 import java.time.LocalDateTime;
 import java.util.Objects;
 
 @Entity
-@Table(name = "contact_messages")
+@Table(name = "contact_us")
 @NoArgsConstructor
 @AllArgsConstructor
-public class ContactMessage {
+@Getter
+@Setter
+public class ContactUs {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -28,7 +32,7 @@ public class ContactMessage {
     @Override
     public boolean equals(Object o) {
         if (o == null || getClass() != o.getClass()) return false;
-        ContactMessage that = (ContactMessage) o;
+        ContactUs that = (ContactUs) o;
         return Objects.equals(id, that.id);
     }
 
