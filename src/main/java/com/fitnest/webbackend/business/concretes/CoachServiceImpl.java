@@ -1,24 +1,20 @@
 package com.fitnest.webbackend.business.concretes;
 
 import com.fitnest.webbackend.business.abstracts.CoachService;
-import com.fitnest.webbackend.exceptions.ConflictException;
 import com.fitnest.webbackend.exceptions.ResourceNotFoundException;
 import com.fitnest.webbackend.model.entities.Coach;
-import com.fitnest.webbackend.model.entities.Specialty;
 import com.fitnest.webbackend.payload.dtos.coach.CreateCoachRequest;
 import com.fitnest.webbackend.payload.dtos.coach.CoachResponse;
 import com.fitnest.webbackend.payload.dtos.coach.UpdateCoachRequest;
 import com.fitnest.webbackend.payload.mappers.CoachMapper;
 import com.fitnest.webbackend.repositories.CoachRepository;
-import com.fitnest.webbackend.repositories.SpecialtyRepository;
+import com.fitnest.webbackend.validation.CoachValidator;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.HashSet;
 import java.util.Objects;
-import java.util.Set;
 import java.util.function.Consumer;
 
 @Slf4j
@@ -27,23 +23,18 @@ import java.util.function.Consumer;
 public class CoachServiceImpl implements CoachService {
 
     private final CoachRepository coachRepository;
-    private final SpecialtyRepository specialtyRepository;
     private final CoachMapper coachMapper;
+    private final CoachValidator coachValidator;
 
     @Override
     @Transactional
     public CoachResponse createCoach(CreateCoachRequest request) {
         log.info("ActionLog.createCoach().start : email={}", request.getEmail());
 
-        if (coachRepository.existsByEmail(request.getEmail())) {
-            throw new ConflictException("Coach with email " + request.getEmail() + " already exists");
-        }
+        coachValidator.validateEmailUniqueness(request.getEmail());
 
         Coach coach = coachMapper.toEntity(request);
-
-        if (request.getSpecialtyIds() != null && !request.getSpecialtyIds().isEmpty()) {
-            coach.setSpecialties(validateAndGetSpecialties(request.getSpecialtyIds()));
-        }
+        coach.setSpecialties(coachValidator.validateAndGetSpecialties(request.getSpecialtyIds()));
 
         Coach savedCoach = coachRepository.save(coach);
         log.info("ActionLog.createCoach().end : coachId={}", savedCoach.getId());
@@ -60,7 +51,7 @@ public class CoachServiceImpl implements CoachService {
                 .orElseThrow(() -> new ResourceNotFoundException("Coach", "id", id));
 
         if (request.getEmail() != null && !Objects.equals(request.getEmail(), coach.getEmail())) {
-            validateEmailUniqueness(request.getEmail());
+            coachValidator.validateEmailUniqueness(request.getEmail());
             coach.setEmail(request.getEmail());
         }
 
@@ -79,9 +70,7 @@ public class CoachServiceImpl implements CoachService {
         updateIfNotNull(request.getGymName(), coach::setGymName);
 
         if (request.getSpecialtyIds() != null) {
-            coach.setSpecialties(request.getSpecialtyIds().isEmpty() 
-                    ? new HashSet<>() 
-                    : validateAndGetSpecialties(request.getSpecialtyIds()));
+            coach.setSpecialties(coachValidator.validateAndGetSpecialties(request.getSpecialtyIds()));
         }
 
         Coach updatedCoach = coachRepository.save(coach);
@@ -94,27 +83,6 @@ public class CoachServiceImpl implements CoachService {
         if (value != null) {
             setter.accept(value);
         }
-    }
-
-    private void validateEmailUniqueness(String email) {
-        if (coachRepository.existsByEmail(email)) {
-            throw new ConflictException("Coach with email " + email + " already exists");
-        }
-    }
-
-    private Set<Specialty> validateAndGetSpecialties(Set<Long> specialtyIds) {
-        Set<Specialty> specialties = specialtyRepository.findAllByIdIn(specialtyIds);
-        
-        if (specialties.size() != specialtyIds.size()) {
-            Set<Long> foundIds = specialties.stream()
-                    .map(Specialty::getId)
-                    .collect(java.util.stream.Collectors.toSet());
-            Set<Long> missingIds = new HashSet<>(specialtyIds);
-            missingIds.removeAll(foundIds);
-            throw new ResourceNotFoundException("Specialty", "id", missingIds);
-        }
-        
-        return specialties;
     }
 
     @Override
