@@ -20,7 +20,7 @@ import java.util.function.Consumer;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-public class CoachServiceImpl implements CoachService {
+public class CoachManager implements CoachService {
 
     private final CoachRepository coachRepository;
     private final CoachMapper coachMapper;

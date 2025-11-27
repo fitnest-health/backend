@@ -23,7 +23,7 @@ import static org.springframework.http.HttpStatus.UNAUTHORIZED;
 
 @Service
 @RequiredArgsConstructor
-public class AuthServiceImpl implements AuthService {
+public class AuthManager implements AuthService {
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;

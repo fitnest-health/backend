@@ -15,7 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-public class SpecialtyServiceImpl implements SpecialtyService {
+public class SpecialtyManager implements SpecialtyService {
 
     private final SpecialtyRepository specialtyRepository;
     private final SpecialtyMapper specialtyMapper;
