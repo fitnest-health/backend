@@ -17,7 +17,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.HashSet;
+import java.util.Objects;
 import java.util.Set;
+import java.util.function.Consumer;
 
 @Slf4j
 @Service
@@ -40,18 +42,7 @@ public class CoachServiceImpl implements CoachService {
         Coach coach = coachMapper.toEntity(request);
 
         if (request.getSpecialtyIds() != null && !request.getSpecialtyIds().isEmpty()) {
-            Set<Specialty> specialties = specialtyRepository.findAllByIdIn(request.getSpecialtyIds());
-            
-            if (specialties.size() != request.getSpecialtyIds().size()) {
-                Set<Long> foundIds = specialties.stream()
-                        .map(Specialty::getId)
-                        .collect(java.util.stream.Collectors.toSet());
-                Set<Long> missingIds = new HashSet<>(request.getSpecialtyIds());
-                missingIds.removeAll(foundIds);
-                throw new ResourceNotFoundException("Specialty", "id", missingIds);
-            }
-            
-            coach.setSpecialties(specialties);
+            coach.setSpecialties(validateAndGetSpecialties(request.getSpecialtyIds()));
         }
 
         Coach savedCoach = coachRepository.save(coach);
@@ -68,70 +59,29 @@ public class CoachServiceImpl implements CoachService {
         Coach coach = coachRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Coach", "id", id));
 
-        if (request.getEmail() != null && !request.getEmail().equals(coach.getEmail())) {
-            if (coachRepository.existsByEmail(request.getEmail())) {
-                throw new ConflictException("Coach with email " + request.getEmail() + " already exists");
-            }
+        if (request.getEmail() != null && !Objects.equals(request.getEmail(), coach.getEmail())) {
+            validateEmailUniqueness(request.getEmail());
             coach.setEmail(request.getEmail());
         }
 
-        if (request.getFullName() != null) {
-            coach.setFullName(request.getFullName());
-        }
-        if (request.getTitle() != null) {
-            coach.setTitle(request.getTitle());
-        }
-        if (request.getBio() != null) {
-            coach.setBio(request.getBio());
-        }
-        if (request.getImageUrl() != null) {
-            coach.setImageUrl(request.getImageUrl());
-        }
-        if (request.getGender() != null) {
-            coach.setGender(request.getGender());
-        }
-        if (request.getPhoneNumber() != null) {
-            coach.setPhoneNumber(request.getPhoneNumber());
-        }
-        if (request.getAddress() != null) {
-            coach.setAddress(request.getAddress());
-        }
-        if (request.getWorkingHoursWeekdays() != null) {
-            coach.setWorkingHoursWeekdays(request.getWorkingHoursWeekdays());
-        }
-        if (request.getWorkingHoursWeekend() != null) {
-            coach.setWorkingHoursWeekend(request.getWorkingHoursWeekend());
-        }
-        if (request.getInstagramUrl() != null) {
-            coach.setInstagramUrl(request.getInstagramUrl());
-        }
-        if (request.getFacebookUrl() != null) {
-            coach.setFacebookUrl(request.getFacebookUrl());
-        }
-        if (request.getLinkedinUrl() != null) {
-            coach.setLinkedinUrl(request.getLinkedinUrl());
-        }
-        if (request.getGymName() != null) {
-            coach.setGymName(request.getGymName());
-        }
+        updateIfNotNull(request.getFullName(), coach::setFullName);
+        updateIfNotNull(request.getTitle(), coach::setTitle);
+        updateIfNotNull(request.getBio(), coach::setBio);
+        updateIfNotNull(request.getImageUrl(), coach::setImageUrl);
+        updateIfNotNull(request.getGender(), coach::setGender);
+        updateIfNotNull(request.getPhoneNumber(), coach::setPhoneNumber);
+        updateIfNotNull(request.getAddress(), coach::setAddress);
+        updateIfNotNull(request.getWorkingHoursWeekdays(), coach::setWorkingHoursWeekdays);
+        updateIfNotNull(request.getWorkingHoursWeekend(), coach::setWorkingHoursWeekend);
+        updateIfNotNull(request.getInstagramUrl(), coach::setInstagramUrl);
+        updateIfNotNull(request.getFacebookUrl(), coach::setFacebookUrl);
+        updateIfNotNull(request.getLinkedinUrl(), coach::setLinkedinUrl);
+        updateIfNotNull(request.getGymName(), coach::setGymName);
 
         if (request.getSpecialtyIds() != null) {
-            if (request.getSpecialtyIds().isEmpty()) {
-                coach.setSpecialties(new HashSet<>());
-            } else {
-                Set<Specialty> specialties = specialtyRepository.findAllByIdIn(request.getSpecialtyIds());
-                
-                if (specialties.size() != request.getSpecialtyIds().size()) {
-                    Set<Long> foundIds = specialties.stream()
-                            .map(Specialty::getId)
-                            .collect(java.util.stream.Collectors.toSet());
-                    Set<Long> missingIds = new HashSet<>(request.getSpecialtyIds());
-                    missingIds.removeAll(foundIds);
-                    throw new ResourceNotFoundException("Specialty", "id", missingIds);
-                }
-                
-                coach.setSpecialties(specialties);
-            }
+            coach.setSpecialties(request.getSpecialtyIds().isEmpty() 
+                    ? new HashSet<>() 
+                    : validateAndGetSpecialties(request.getSpecialtyIds()));
         }
 
         Coach updatedCoach = coachRepository.save(coach);
@@ -140,15 +90,43 @@ public class CoachServiceImpl implements CoachService {
         return coachMapper.toResponse(updatedCoach);
     }
 
+    private <T> void updateIfNotNull(T value, Consumer<T> setter) {
+        if (value != null) {
+            setter.accept(value);
+        }
+    }
+
+    private void validateEmailUniqueness(String email) {
+        if (coachRepository.existsByEmail(email)) {
+            throw new ConflictException("Coach with email " + email + " already exists");
+        }
+    }
+
+    private Set<Specialty> validateAndGetSpecialties(Set<Long> specialtyIds) {
+        Set<Specialty> specialties = specialtyRepository.findAllByIdIn(specialtyIds);
+        
+        if (specialties.size() != specialtyIds.size()) {
+            Set<Long> foundIds = specialties.stream()
+                    .map(Specialty::getId)
+                    .collect(java.util.stream.Collectors.toSet());
+            Set<Long> missingIds = new HashSet<>(specialtyIds);
+            missingIds.removeAll(foundIds);
+            throw new ResourceNotFoundException("Specialty", "id", missingIds);
+        }
+        
+        return specialties;
+    }
+
     @Override
     @Transactional
     public void deleteCoach(Long id) {
         log.info("ActionLog.deleteCoach().start : coachId={}", id);
 
-        Coach coach = coachRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Coach", "id", id));
+        if (!coachRepository.existsById(id)) {
+            throw new ResourceNotFoundException("Coach", "id", id);
+        }
 
-        coachRepository.delete(coach);
+        coachRepository.deleteById(id);
         log.info("ActionLog.deleteCoach().end : coachId={}", id);
     }
 }

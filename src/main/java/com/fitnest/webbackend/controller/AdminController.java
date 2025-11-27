@@ -30,7 +30,9 @@ public class AdminController {
     @PostMapping("/coaches")
     public ResponseEntity<CoachResponse> createCoach(@Valid @RequestBody CreateCoachRequest request) {
         CoachResponse response = coachService.createCoach(request);
-        return ResponseEntity.status(HttpStatus.CREATED).body(response);
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .header("Location", "/api/v1/admin/coaches/" + response.getId())
+                .body(response);
     }
 
     @PutMapping("/coaches/{id}")
@@ -50,7 +52,9 @@ public class AdminController {
     @PostMapping("/specialties")
     public ResponseEntity<SpecialtyResponse> createSpecialty(@Valid @RequestBody CreateSpecialtyRequest request) {
         SpecialtyResponse response = specialtyService.createSpecialty(request);
-        return ResponseEntity.status(HttpStatus.CREATED).body(response);
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .header("Location", "/api/v1/admin/specialties/" + response.getId())
+                .body(response);
     }
 }
 
