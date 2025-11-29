@@ -1,0 +1,215 @@
+name: Development CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - development
+    paths:
+      - 'src/**'
+      - 'build.gradle'
+      - 'Dockerfile'
+      - 'docker-compose.development.yml'
+      - '.github/workflows/**'
+  pull_request:
+    branches:
+      - development
+    paths:
+      - 'src/**'
+      - 'build.gradle'
+      - 'Dockerfile'
+      - 'docker-compose.development.yml'
+      - '.github/workflows/**'
+
+# Concurrency control - cancel in-progress runs when new commit is pushed
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build-and-test:
+    name: Build and Test (Development)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: 'gradle'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version-file: gradle/wrapper/gradle-wrapper.properties
+
+      - name: Build with Gradle
+        run: ./gradlew build --no-daemon --build-cache --parallel
+
+      - name: Run tests
+        run: ./gradlew test --no-daemon --build-cache --parallel
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: build/test-results/test/**/*.xml
+          retention-days: 7
+          compression-level: 6
+      
+      - name: Upload build artifacts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-artifacts
+          path: build/libs/*.jar
+          retention-days: 1
+          compression-level: 6
+
+  build-and-push-image:
+    name: Build and Push Docker Image (Development)
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    if: github.event_name == 'push'
+    timeout-minutes: 20
+    
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: |
+            image=moby/buildkit:latest
+            network=host
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=development-
+            type=raw,value=development,enable=${{ github.ref == 'refs/heads/development' }}
+            type=raw,value=dev-latest,enable=${{ github.ref == 'refs/heads/development' }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: |
+            type=gha
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
+          cache-to: |
+            type=gha,mode=max
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
+          platforms: linux/amd64
+          build-args: |
+            BUILDKIT_INLINE_CACHE=1
+
+  deploy:
+    name: Deploy Development to Server
+    runs-on: ubuntu-latest
+    needs: build-and-push-image
+    if: github.event_name == 'push' && github.ref == 'refs/heads/development'
+    timeout-minutes: 10
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set default SSH port
+        id: ssh-port
+        run: echo "port=${{ secrets.DEPLOY_PORT || '22' }}" >> $GITHUB_OUTPUT
+
+      - name: Copy files to server
+        uses: appleboy/scp-action@v0.1.8
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ steps.ssh-port.outputs.port }}
+          source: "docker-compose.development.yml,deploy.sh"
+          target: "/home/${{ secrets.DEPLOY_USER }}/fitnest-backend/"
+
+      - name: Deploy to server
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ steps.ssh-port.outputs.port }}
+          script: |
+            set -e
+            DEPLOY_DIR="/home/${{ secrets.DEPLOY_USER }}/fitnest-backend"
+            mkdir -p $DEPLOY_DIR
+            cd $DEPLOY_DIR
+            
+            # Make deploy.sh executable
+            chmod +x deploy.sh || true
+            
+            # Login to container registry
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
+            
+            # Pull latest development image
+            docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:dev-latest
+            
+            # Create .env file for docker-compose
+            cat > .env << EOF
+            IMAGE_NAME=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+            IMAGE_TAG=dev-latest
+            POSTGRES_DB=fitnest_db
+            POSTGRES_USER=fitnest_user
+            POSTGRES_PASSWORD=${{ secrets.DB_PASSWORD }}
+            POSTGRES_PORT=5432
+            JWT_SECRET=${{ secrets.JWT_SECRET }}
+            JWT_EXPIRATION=${{ secrets.JWT_EXPIRATION }}
+            SPRING_JPA_HIBERNATE_DDL_AUTO=update
+            EOF
+            
+            # Run deployment script
+            ./deploy.sh || {
+              echo "Deployment script failed, trying manual deployment..."
+              # Fallback: manual deployment
+              docker-compose -f docker-compose.development.yml down || true
+              docker-compose -f docker-compose.development.yml up -d
+              sleep 15
+              docker-compose -f docker-compose.development.yml ps
+            }
+            
+            # Show final status
+            echo "=== Final Container Status ==="
+            docker-compose -f docker-compose.development.yml ps
+            
+            # Show recent logs
+            echo "=== Recent Logs ==="
+            docker-compose -f docker-compose.development.yml logs --tail=30
+
