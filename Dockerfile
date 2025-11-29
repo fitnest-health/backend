@@ -8,13 +8,14 @@ COPY gradle gradle
 COPY build.gradle settings.gradle gradle.properties ./
 
 # Download dependencies (cached layer if build files don't change)
-RUN ./gradlew dependencies --no-daemon || true
+# Use --refresh-dependencies only when needed, otherwise use cache
+RUN ./gradlew dependencies --no-daemon --build-cache || true
 
-# Copy source code
+# Copy source code (separate layer for better caching)
 COPY src src
 
-# Build the application
-RUN ./gradlew bootJar --no-daemon --build-cache
+# Build the application with optimizations
+RUN ./gradlew bootJar --no-daemon --build-cache --parallel --max-workers=4
 
 # Runtime stage
 FROM eclipse-temurin:21-jre-alpine
@@ -42,12 +43,17 @@ EXPOSE 9898
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
   CMD wget --no-verbose --tries=1 --spider http://localhost:9898/actuator/health 2>/dev/null || exit 1
 
-# Run the application with optimized JVM settings
+# Run the application with optimized JVM settings for containers
 ENTRYPOINT ["java", \
     "-XX:+UseContainerSupport", \
     "-XX:MaxRAMPercentage=75.0", \
     "-XX:+UseG1GC", \
+    "-XX:MaxGCPauseMillis=200", \
     "-XX:+UseStringDeduplication", \
+    "-XX:+OptimizeStringConcat", \
+    "-XX:+UseCompressedOops", \
+    "-XX:+UseCompressedClassPointers", \
     "-Djava.security.egd=file:/dev/./urandom", \
+    "-Dspring.backgroundpreinitializer.ignore=true", \
     "-jar", "app.jar"]
 

@@ -72,6 +72,22 @@ dependencies {
 
 tasks.named('test') {
     useJUnitPlatform()
+    maxParallelForks = Runtime.runtime.availableProcessors().intdiv(2) ?: 1
+    testLogging {
+        events "passed", "skipped", "failed"
+        exceptionFormat "full"
+    }
+}
+
+// Optimize build performance
+tasks.named('compileJava') {
+    options.compilerArgs += ['-parameters']
+    options.incremental = true
+}
+
+// Parallel execution for faster builds
+tasks.named('build') {
+    dependsOn tasks.named('test')
 }
 
 // Configure annotation processor for Lombok + MapStruct

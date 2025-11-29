@@ -71,7 +71,7 @@ echo -e "${YELLOW}Pulling latest images...${NC}"
 $DOCKER_COMPOSE -f "$COMPOSE_FILE" pull backend || true
 
 echo -e "${YELLOW}Starting services...${NC}"
-$DOCKER_COMPOSE -f "$COMPOSE_FILE" up -d
+$DOCKER_COMPOSE -f "$COMPOSE_FILE" up -d --remove-orphans
 
 echo -e "${YELLOW}Waiting for services to be healthy...${NC}"
 sleep 10
