@@ -120,6 +120,16 @@ jobs:
         id: ssh-port
         run: echo "port=${{ secrets.DEPLOY_PORT || '22' }}" >> $GITHUB_OUTPUT
 
+      - name: Copy files to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ steps.ssh-port.outputs.port }}
+          source: "docker-compose.development.yml,deploy.sh"
+          target: "/home/${{ secrets.DEPLOY_USER }}/fitnest-backend/"
+
       - name: Deploy to server
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -129,33 +139,47 @@ jobs:
           port: ${{ steps.ssh-port.outputs.port }}
           script: |
             set -e
+            DEPLOY_DIR="/home/${{ secrets.DEPLOY_USER }}/fitnest-backend"
+            mkdir -p $DEPLOY_DIR
+            cd $DEPLOY_DIR
+            
+            # Make deploy.sh executable
+            chmod +x deploy.sh || true
+            
             # Login to container registry
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
             
             # Pull latest development image
             docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:dev-latest
             
-            # Stop and remove old container gracefully
-            if docker ps -a --format '{{.Names}}' | grep -q '^fitnest-backend-dev$'; then
-              docker stop fitnest-backend-dev || true
-              docker rm fitnest-backend-dev || true
-            fi
+            # Create .env file for docker-compose
+            cat > .env << EOF
+            IMAGE_NAME=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+            IMAGE_TAG=dev-latest
+            POSTGRES_DB=fitnest_db
+            POSTGRES_USER=fitnest_user
+            POSTGRES_PASSWORD=${{ secrets.DB_PASSWORD }}
+            POSTGRES_PORT=5432
+            JWT_SECRET=${{ secrets.JWT_SECRET }}
+            JWT_EXPIRATION=${{ secrets.JWT_EXPIRATION }}
+            SPRING_JPA_HIBERNATE_DDL_AUTO=update
+            EOF
             
-            # Run new container with environment variables and health check
-            docker run -d \
-              --name fitnest-backend-dev \
-              --restart unless-stopped \
-              --health-cmd="wget --no-verbose --tries=1 --spider http://localhost:9898/actuator/health || exit 1" \
-              --health-interval=30s \
-              --health-timeout=10s \
-              --health-start-period=60s \
-              --health-retries=3 \
-              -p 9898:9898 \
-              -e SPRING_DATASOURCE_URL="${{ secrets.DB_URL }}" \
-              -e SPRING_DATASOURCE_USERNAME="${{ secrets.DB_USERNAME }}" \
-              -e SPRING_DATASOURCE_PASSWORD="${{ secrets.DB_PASSWORD }}" \
-              -e JWT_SECRET="${{ secrets.JWT_SECRET }}" \
-              -e JWT_EXPIRATION="${{ secrets.JWT_EXPIRATION }}" \
-              -e SERVER_PORT=9898 \
-              ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:dev-latest
+            # Run deployment script
+            ./deploy.sh || {
+              echo "Deployment script failed, trying manual deployment..."
+              # Fallback: manual deployment
+              docker-compose -f docker-compose.development.yml down || true
+              docker-compose -f docker-compose.development.yml up -d
+              sleep 15
+              docker-compose -f docker-compose.development.yml ps
+            }
+            
+            # Show final status
+            echo "=== Final Container Status ==="
+            docker-compose -f docker-compose.development.yml ps
+            
+            # Show recent logs
+            echo "=== Recent Logs ==="
+            docker-compose -f docker-compose.development.yml logs --tail=30
 

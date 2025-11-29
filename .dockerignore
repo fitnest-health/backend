@@ -27,6 +27,11 @@ README.md
 # CI/CD
 .github
 
+# Docker Compose
+.env
+.env.local
+docker-compose.override.yml
+
 # Logs
 *.log
 
